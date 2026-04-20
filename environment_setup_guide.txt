@@ -1,0 +1,70 @@
+============ C++/CUDA EXTENSIONS IN CONDA ENVIRONMENT SETUP GUIDE ============
+
+This guide explains how to properly set up your environment to build custom C++/CUDA 
+extensions for PyTorch, specifically addressing conflicts between new CUDA Toolkits 
+(like 12.6) and PyTorch's default compiler flags.
+
+--- STEP 1: INSTALL SYSTEM COMPILERS ---
+The system requires standard C++ build tools before nvcc (the CUDA compiler) can work.
+Run these commands with sudo/root:
+  apt update 
+  apt install -y g++ build-essential
+
+--- STEP 2: INSTALL THE COMPLETE CUDA TOOLKIT VIA CONDA ---
+Avoid installing `cuda-nvcc` or `cuda-cudart-dev` piecemeal, as this can result in 
+missing standard C++ headers (which causes the `fatal error: nv/target: No such file` error).
+
+Install the complete toolkit (this includes long timeouts as the package is large):
+  conda config --set remote_connect_timeout_secs 60.0
+  conda config --set remote_read_timeout_secs 240.0
+  conda config --set remote_max_retries 10
+  conda install -c nvidia cuda-toolkit -y
+
+--- STEP 3: EXPORT CONDA HEADER PATHS ---
+Conda installs CUDA C++ core headers inside a nested directory that `nvcc` ignores 
+by default. You must explicitly tell the C++ compilers where to look by setting the 
+CPATH environment variable:
+  export CPATH="$CONDA_PREFIX/targets/x86_64-linux/include:$CONDA_PREFIX/targets/x86_64-linux/include/cccl:$CPATH"
+
+--- STEP 4: INSTALL CUDA 12.6 COMPATIBLE PYTORCH ---
+Ensure your PyTorch version fully supports the latest CUDA version you installed. 
+If your local PyTorch is out of date, manually install the specific hardware wheel:
+  pip install --upgrade --force-reinstall torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126
+  (Note: PyTorch 2.11.0+cu126 was verified for this build)
+
+--- STEP 5: BYPASS PYTORCH AUTO-DETECTION ISSUES ---
+If you get `ValueError: Unknown CUDA arch (10.3) or GPU not supported` when building, 
+it means your PyTorch version is older than your actual physical GPU architecture. 
+You can manually override PyTorch's hardware detection to compile for a widely-supported 
+architecture like Ampere (8.6) or Ada Lovelace (8.9):
+  export TORCH_CUDA_ARCH_LIST="8.6"
+
+--- STEP 6: FIX THE PYTORCH + CUDA 12.6 NVIDIA HEADER BUG ---
+Nvidia's CUDA 12.6 toolkit added new FP4 (4-bit) and FP6 (6-bit) data types via 
+their new `cuda_fp4.hpp` and `cuda_fp6.hpp` headers. Unfortunately, PyTorch currently 
+disables standard "Half" (16-bit) floats natively when compiling extensions. 
+
+Because those new FP4/FP6 implementations depend on conversions to Half-floats, compiling 
+in PyTorch creates a wildly broken C++ syntax tree, giving syntax errors like:
+  `error: expected a ";"`
+  `explicit`
+
+To fix this, you must ALWAYS include these two `#define` statements at the absolute 
+TOP of your `.cu` extension files, BEFORE you include `<torch/extension.h>`.
+
+Example (`csrc/matmul_kernel.cu`):
+--------------------------------------------------
+#define __CUDA_NO_FP4_CONVERSIONS__
+#define __CUDA_NO_FP6_CONVERSIONS__
+
+#include <torch/extension.h>
+#include <cuda_runtime.h>
+
+// Your custom CUDA Kernel code here...
+--------------------------------------------------
+
+These C-preprocessor macros intentionally hide the broken Nvidia FP4/FP6 code blocks 
+from the compiler before it even attempts to parse them.
+
+You can then successfully compile your extensions by running:
+  python setup.py install

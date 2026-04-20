@@ -1,0 +1,13 @@
+
+--- Benchmark Run ---
+Prompt: Explain the difference between Python and C++ in two sentences.
+
+Model Response:
+Python is a high-level, interpreted language known for its simplicity and rapid development, while C++ is a low-level, compiled language offering high performance and fine-grained control over system resources. Essentially, Python prioritizes ease of use and speed of development, whereas C++ prioritizes execution speed and efficiency.
+
+--- Baseline Metrics ---
+Tokens Generated: 64
+Total Time:       7.2260 seconds
+Tokens Per Sec:   8.86 TPS
+-----------------------
+
